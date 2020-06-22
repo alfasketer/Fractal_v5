@@ -20,10 +20,7 @@ uint8_t *PIXELS;
 double *X_COORDS;
 double *Y_COORDS;
 
-long pixel_index = 0;
-
 pthread_t * threads;
-pthread_mutex_t lock;
 
 double LIMITS[] = {-2, +2, -1, +1};
 int indices[128];
@@ -117,30 +114,15 @@ void *write_pixels(void *arg)
 {
 	struct timespec spec_a, spec_b;
 	double start, end;
-	int i, j, k, blue, pixel, count = 0;
+	int i, j, k, blue, pixel;
 	double cx, cy, x, y, zx = 0, zy = 0, xt = 0, yt = 0;
 	int *index = (int*) arg;
 
 	clock_gettime(CLOCK_REALTIME, &spec_a);
 	if (!quiet) printf("Thread-%d started.\n", *index);
 	
-	while (1)
+	for (pixel = *index; pixel < HEIGHT*WIDTH; pixel+=NTHREADS)
 	{
-		pthread_mutex_lock(&lock);
-			if (pixel_index < WIDTH*HEIGHT)
-			{
-				pixel = pixel_index;
-				pixel_index++;
-				count++;
-			}
-			else
-			{
-				pthread_mutex_unlock(&lock);
-				break;
-			}
-
-		pthread_mutex_unlock(&lock);
-
 		i = pixel%WIDTH;
 		j = pixel/WIDTH;
 
@@ -181,7 +163,6 @@ void *write_pixels(void *arg)
 	end = spec_b.tv_sec*1000 + spec_b.tv_nsec/1000000;
 	
 	if (!quiet) printf("Thread-%d stopped.\n", *index);
-	if (!quiet) printf("Thread-%d calculated %d pixels.\n", *index, count);
 	if (!quiet) printf("Thread-%d execution time was (milis): %lf.\n", *index, end-start);
 	return 0;
 }
@@ -355,12 +336,6 @@ int main(int argc, char* argv[])
 	double start, end;
 
 	clock_gettime(CLOCK_REALTIME, &spec_a);
-
-	if (pthread_mutex_init(&lock, NULL) != 0)
-    {
-        printf("\n ERROR: Mutex init failed\n");
-        return 1;
-    }
 
 	parse_args(argc, argv);
 	malloc_all();
