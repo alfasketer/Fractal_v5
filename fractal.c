@@ -12,15 +12,18 @@ const int ITER_LIMIT = 255;
 
 char quiet = 0;
 
-int WIDTH = 320;
-int HEIGHT = 240;
+int WIDTH = 640;
+int HEIGHT = 480;
 int NTHREADS = 1;
 
 uint8_t *PIXELS;
 double *X_COORDS;
 double *Y_COORDS;
 
-long pixel_index = 0;
+long block_index = 0;
+int granularity = 1;
+int block_size = 1;
+
 
 pthread_t * threads;
 pthread_mutex_t lock;
@@ -31,7 +34,7 @@ int indices[128];
 char *file_name = NULL;
 
 
-static void printError(enum TinyPngOut_Status status) {
+static void png_error(enum TinyPngOut_Status status) {
 	const char *msg;
 	switch (status) {
 		case TINYPNGOUT_OK:
@@ -73,7 +76,7 @@ int png_write()
 	enum TinyPngOut_Status status = TinyPngOut_init(&pngout, (uint32_t)WIDTH, (uint32_t)HEIGHT, fout);
 	if (status != TINYPNGOUT_OK)
 	{
-		printError(status);
+		png_error(status);
 		return EXIT_FAILURE;
 	}
 
@@ -81,7 +84,7 @@ int png_write()
 	status = TinyPngOut_write(&pngout, PIXELS, (size_t)(WIDTH * HEIGHT));
 	if (status != TINYPNGOUT_OK)
 	{
-		printError(status);
+		png_error(status);
 		return EXIT_FAILURE;	
 	}
 
@@ -117,7 +120,7 @@ void *write_pixels(void *arg)
 {
 	struct timespec spec_a, spec_b;
 	double start, end;
-	int i, j, k, blue, pixel, count = 0;
+	int i, j, l, k, blue, pixel, p_index, count = 0;
 	double cx, cy, x, y, zx = 0, zy = 0, xt = 0, yt = 0;
 	int *index = (int*) arg;
 
@@ -127,10 +130,10 @@ void *write_pixels(void *arg)
 	while (1)
 	{
 		pthread_mutex_lock(&lock);
-			if (pixel_index < WIDTH*HEIGHT)
+			if (block_index < WIDTH*HEIGHT)
 			{
-				pixel = pixel_index;
-				pixel_index++;
+				p_index = block_index;
+				block_index+=block_size;
 				count++;
 			}
 			else
@@ -141,38 +144,45 @@ void *write_pixels(void *arg)
 
 		pthread_mutex_unlock(&lock);
 
-		i = pixel%WIDTH;
-		j = pixel/WIDTH;
-
-		cx = X_COORDS[i];
-		cy = Y_COORDS[j];
-		zx = 0;
-		zy = 0;
-
-		for(k = 0; k < ITER_LIMIT; k++)
+		for (l = 0; l < block_size; l++)
 		{
-			xt = exp(zx*zx-zy*zy+cx);
-			yt = 2*zx*zy + cy;
-			x = xt * cos(yt);
-			y = xt * sin(yt);
+			pixel = p_index+l;
 
-			if (x*x+y*y > 4.0) break;
-			zx = x;
-			zy = y;
+			if (pixel >= WIDTH*HEIGHT) break;
+
+			i = pixel%WIDTH;
+			j = pixel/WIDTH;
+
+			cx = X_COORDS[i];
+			cy = Y_COORDS[j];
+			zx = 0;
+			zy = 0;
+
+			for(k = 0; k < ITER_LIMIT; k++)
+			{
+				xt = exp(zx*zx-zy*zy+cx);
+				yt = 2*zx*zy + cy;
+				x = xt * cos(yt);
+				y = xt * sin(yt);
+
+				if (sqrt(x*x+y*y) > 400000000) break;
+				zx = x;
+				zy = y;
+			}
+				
+			if(k==ITER_LIMIT) continue;
+
+			if(k <= 15)
+				blue = 18*k;
+			else
+				blue = 270 + k;
+
+			blue > ITER_LIMIT? blue = ITER_LIMIT: 1;
+
+			PIXELS[3*pixel] = ITER_LIMIT - (blue > 255? 511 - blue: blue);
+			PIXELS[3*pixel+1] = ITER_LIMIT - k;
+			PIXELS[3*pixel+2] = ITER_LIMIT;
 		}
-			
-		if(k==ITER_LIMIT) continue;
-
-		if(k <= 15)
-			blue = 18*k;
-		else
-			blue = 270 + k;
-
-		blue > ITER_LIMIT? blue = ITER_LIMIT: 1;
-
-		PIXELS[3*pixel] = ITER_LIMIT - (blue > 255? 511 - blue: blue);
-		PIXELS[3*pixel+1] = ITER_LIMIT - k;
-		PIXELS[3*pixel+2] = ITER_LIMIT;
 	}
 
 	clock_gettime(CLOCK_REALTIME, &spec_b);
@@ -181,7 +191,7 @@ void *write_pixels(void *arg)
 	end = spec_b.tv_sec*1000 + spec_b.tv_nsec/1000000;
 	
 	if (!quiet) printf("Thread-%d stopped.\n", *index);
-	if (!quiet) printf("Thread-%d calculated %d pixels.\n", *index, count);
+	if (!quiet) printf("Thread-%d calculated %d blocks.\n", *index, count);
 	if (!quiet) printf("Thread-%d execution time was (milis): %lf.\n", *index, end-start);
 	return 0;
 }
@@ -189,6 +199,9 @@ void *write_pixels(void *arg)
 int gen_pixels()
 {
 	int i;
+
+	if (granularity != -1) block_size = (WIDTH*HEIGHT)/(granularity*NTHREADS);
+	if ((WIDTH*HEIGHT)%(granularity*NTHREADS)>0) block_size++;
 
 	for(i = 0; i < NTHREADS; i++)
 		indices[i] = i;
@@ -250,7 +263,7 @@ void get_resolution(char* input)
 void get_dimensions(char* input)
 {
 	double a, b, c, d;
-	char format_warning[] = "ERROR: The value of option -r must be in the following format:\n\t\"<LEFT_LIMIIT>:<RIGHT_LIMIT>:<DOWN_LIMIT>:<UP_LIMIT>\".\n";
+	char format_warning[] = "ERROR: The value of option -r must be in the following format:\n\t\"<LEFT_LIMIT>:<RIGHT_LIMIT>:<DOWN_LIMIT>:<UP_LIMIT>\".\n";
 	char value_warning[] = "%sERROR: The value %s of option -r must be smaller than the value %s.\n%s";
 	char revert_message[] = "\tReverting to default.\n";
 	const char s[2] = ":";
@@ -320,12 +333,32 @@ void get_num_threads(char* input)
 	NTHREADS = num;
 }
 
+void get_granularity(char* input)
+{
+	char value_warning[] = "ERROR: The value of option -g must be numerical and larger than zero.\n";
+	char revert_message[] = "\tReverting to default.\n";
+
+	if(!strcmp(input, "MAX"))
+	{
+		granularity = -1;
+		block_size = 1;
+		return;
+	}
+
+	int num = atoi(input);
+	
+	if (num <= 0) { fprintf(stderr, "%s%s", value_warning, revert_message); return; }
+
+	granularity = num;
+}
+
+
 int parse_args(int argc, char* argv[])
 {
 	int opt;
 	
 	while (1) {
-		opt = getopt(argc, argv, "qs:r:o:t:");
+		opt = getopt(argc, argv, "qs:r:o:t:g:");
 		if(opt == -1) break;
 		switch (opt) {
 		case 'q':
@@ -342,6 +375,9 @@ int parse_args(int argc, char* argv[])
 			break;
 	  	case 't':
 			get_num_threads(optarg);
+			break;
+		case 'g':
+			get_granularity(optarg);
 			break;
 		default:
 			break;
@@ -366,16 +402,17 @@ int main(int argc, char* argv[])
 	malloc_all();
 	gen_coords();
 	gen_pixels();
+	
+	clock_gettime(CLOCK_REALTIME, &spec_b);
+
 	png_write();
 	free_all();
-
-	clock_gettime(CLOCK_REALTIME, &spec_b);
 
 	start = spec_a.tv_sec*1000 + spec_a.tv_nsec/1000000;
 	end = spec_b.tv_sec*1000 + spec_b.tv_nsec/1000000;
 	
 	if (!quiet) printf("Threads used in current run: %d\n", NTHREADS);
-	if (!quiet) printf("Total execution time for current run (millis): %lf.\n", end-start);
+	if (!quiet) printf("Total execution time for current run with %d threads and granularity %d (millis): %lf.\n", NTHREADS, granularity, end-start);
 
 	return 0;
 }

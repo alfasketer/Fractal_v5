@@ -195,8 +195,10 @@ static bool write(struct TinyPngOut this[static 1], const uint8_t data[], size_t
 // Reads the 'crc' field and updates its value based on the given array of new data.
 static void crc32(struct TinyPngOut this[static 1], const uint8_t data[], size_t len) {
 	this->crc = ~this->crc;
-	for (size_t i = 0; i < len; i++) {
-		for (int j = 0; j < 8; j++) {  // Inefficient bitwise implementation, instead of table-based
+	size_t i;
+	int j;
+	for (i = 0; i < len; i++) {
+		for (j = 0; j < 8; j++) {  // Inefficient bitwise implementation, instead of table-based
 			uint32_t bit = (this->crc ^ (data[i] >> j)) & 1;
 			this->crc = (this->crc >> 1) ^ ((-bit) & UINT32_C(0xEDB88320));
 		}
@@ -209,7 +211,8 @@ static void crc32(struct TinyPngOut this[static 1], const uint8_t data[], size_t
 static void adler32(struct TinyPngOut this[static 1], const uint8_t data[], size_t len) {
 	uint32_t s1 = this->adler & 0xFFFF;
 	uint32_t s2 = this->adler >> 16;
-	for (size_t i = 0; i < len; i++) {
+	size_t i;
+	for (i = 0; i < len; i++) {
 		s1 = (s1 + data[i]) % 65521;
 		s2 = (s2 + s1) % 65521;
 	}
@@ -218,6 +221,7 @@ static void adler32(struct TinyPngOut this[static 1], const uint8_t data[], size
 
 
 static void putBigUint32(uint32_t val, uint8_t array[static 4]) {
-	for (int i = 0; i < 4; i++)
+	int i;
+	for (i = 0; i < 4; i++)
 		array[i] = (uint8_t)(val >> ((3 - i) * 8));
 }

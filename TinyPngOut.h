@@ -19,7 +19,8 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
-#pragma once
+#ifndef TINYPNGOUT_H
+#define TINYPNGOUT_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -73,3 +74,5 @@ enum TinyPngOut_Status TinyPngOut_init(struct TinyPngOut this[static 1], uint32_
  * there are no more valid operations on the object and it should be discarded.
  */
 enum TinyPngOut_Status TinyPngOut_write(struct TinyPngOut this[static 1], const uint8_t pixels[], size_t count);
+
+#endif
